@@ -1,275 +1,330 @@
 # Sistema di Comunicazione LoRa Bidirezionale con SCL3300
-## Implementazione Embedded su STM32WLE5 (LoRa-E5 Mini) e Gateway RAK7268V2
+## Implementazione embedded su STM32WLE5 (LoRa-E5 Mini), gateway LoRaWAN e dashboard web
 
 ## Abstract
-Questo progetto realizza un sistema completo di comunicazione LoRaWAN bidirezionale tra una scheda LoRa-E5 Mini (STM32WLE5) e un gateway RAK7268V2. Il firmware, scritto in C con STM32CubeIDE, sostituisce integralmente il vecchio firmware AT e implementa: join OTAA autonomo, gestione uplink/downlink, acquisizione da sensore SCL3300 via SPI, calibrazione automatica, filtraggio EMA ottimizzato e pipeline di codifica/decodifica (binario → HEX → Base64). L’infrastruttura lato rete utilizza MQTT (Mosquitto) e una dashboard web per visualizzazione dati e comandi remoti. La soluzione è plug & play: una volta allineate le chiavi OTAA su gateway e firmware, la comunicazione si avvia senza ulteriori interventi.
+
+Progetto end-to-end che realizza una comunicazione LoRaWAN bidirezionale tra una scheda **LoRa-E5 Mini (STM32WLE5)** e un gateway (es. RAK7268V2 o ChirpStack), con una dashboard web in tempo reale per monitorare il sensore **Murata SCL3300** e inviare comandi remoti. Il firmware personalizzato in **C (STM32CubeIDE)** sostituisce il vecchio firmware AT: esegue il join OTAA, gestisce uplink e downlink, acquisisce gli angoli dal SCL3300 tramite SPI e applica filtri EMA adattivi prima di impacchettare i dati in payload binari compatti.
+
+La parte di backend usa un broker MQTT, un bridge Node.js che traduce MQTT in WebSocket e decodifica i payload, mentre il frontend (HTML/CSS/JS con Chart.js) offre grafici, log, storico e pannello comandi. Con chiavi OTAA e topic MQTT corretti, il sistema parte in modo plug & play.
 
 ---
 
-## Caratteristiche
-- Comunicazione LoRaWAN bidirezionale su banda EU868.
-- Join OTAA già integrato nel firmware, con gestione autonoma dello stato di rete.
-- Firmware custom in C (STM32CubeIDE) senza dipendenza da comandi AT.
-- Driver proprietario per sensore Murata SCL3300 via SPI, con verifica WHOAMI.
-- Calibrazione automatica iniziale (100 campioni) e filtro EMA sui tre assi.
-- Pipeline dati: acquisizione → filtraggio → impacchettamento 16 byte → HEX → Base64.
-- Dashboard web con grafico in tempo reale, log eventi e comandi remoti (es. calibrazione).
-- Integrazione MQTT (Mosquitto) per telemetria e controllo.
-- PCB personalizzato con LoRa-E5 + SCL3300 (circa 40 mm × 20 mm).
+## Caratteristiche principali
+
+- Comunicazione LoRaWAN bidirezionale (EU868) con join OTAA gestito nel firmware, senza comandi AT.
+- Driver SPI proprietario per il sensore Murata SCL3300 con verifica WHOAMI e gestione banche.
+- Calibrazione automatica iniziale (100 campioni) per offset X, Y, Z.
+- Filtraggio EMA adattivo:
+  - angoli filtrati con EMA circolare che gestisce il wrap a +/-180 gradi;
+  - temperatura filtrata con EMA scalare;
+  - coefficiente alpha dinamico tra 0.001 e 0.2.
+- Payload uplink binario compatto: 16 byte, quattro float32 little-endian (X, Y, Z, Temp).
+- Bridge Node.js (`server.js`) che:
+  - sottoscrive il topic MQTT di uplink;
+  - decodifica Base64 -> float32;
+  - espone WebSocket (porta 8081) e API REST per i comandi downlink.
+- Dashboard web (`/Web`) con grafici live, log, storico, esportazioni PNG/CSV, autosalvataggio locale e chip di comandi rapidi.
 
 ---
 
-## Architettura di Sistema
+## Architettura di sistema
 
-[ SCL3300 (SPI) ]
-│
-▼
-[ LoRa-E5 Mini - STM32WLE5 ]
-• Firmware C
-• Driver SCL3300
-• EMA
-• LoRaWAN (OTAA)
-│ LoRa EU868
-▼
-[ Gateway RAK7268V2 ]
-• Application (OTAA)
-• Forwarder MQTT
-│ Ethernet/Wi-Fi
-▼
-[ Broker MQTT (Mosquitto) ]
-│
-▼
-[ Web Dashboard ]
-
+```text
+[SCL3300 (SPI)] --SPI--> [LoRa-E5 Mini MCU]
+                          | Firmware C custom
+                          | Filtri EMA + LoRaWAN OTAA
+                          v
+                  [Gateway LoRaWAN]
+                          |
+                          v
+                     [Broker MQTT]
+                          |
+                          v
+                 [server.js bridge]
+                     | MQTT <-> WS
+                     | WS: 8081
+                     | HTTP: 8082
+                          |
+                          v
+                 [Dashboard Web]
+                 index.html + app.js
+```
 
 ---
 
-## Requisiti Tecnici
+## Requisiti tecnici
 
 ### Hardware
-- Scheda LoRa-E5 Mini (STM32WLE5).
-- Sensore Murata SCL3300 collegato via SPI.
-- Gateway LoRaWAN RAK7268V2.
-- PC di sviluppo con interfaccia ST-Link o equivalente per flashing/debug.
-- PCB personalizzato (opzionale, dimensioni circa 4 × 2 cm).
+
+- Scheda **LoRa-E5 Mini (STM32WLE5)**.
+- Sensore **Murata SCL3300** su bus SPI.
+- Gateway LoRaWAN compatibile (RAK7268V2, ChirpStack o equivalente).
+- Interfaccia **ST-Link** (o simile) per flash e debug.
+- PCB personalizzato opzionale con dimensioni indicative 40 x 20 mm.
 
 ### Software
-- STM32CubeIDE (versione recente).
-- Toolchain GCC ARM Embedded integrata in STM32CubeIDE.
-- Mosquitto MQTT Broker.
-- Browser moderno per la dashboard web.
-- Facoltativi: utilità per monitor seriale (es. PuTTY), Node.js se si estende la dashboard.
+
+- **STM32CubeIDE** con toolchain GCC ARM integrata.
+- **Node.js >= 18** e **npm** per bridge e dashboard.
+- Broker MQTT (Mosquitto, ChirpStack MQTT, ecc.).
+- Browser moderno (Chrome, Edge, Firefox).
+- Strumenti facoltativi: monitor seriale (es. PuTTY) e client MQTT grafico (es. MQTTX).
 
 ---
 
-## Struttura del Repository
+## Struttura del repository
 
+```text
 /Firmware
-project (STM32CubeIDE)
+  |- progetto STM32CubeIDE
+  |- scl3300.c / scl3300.h
+  |- ema_adaptive.h
+  |- file applicativi LoRaWAN
 
 /Web
-interfaccia
+  |- index.html
+  |- style.css
+  |- app.js
+  |- EnergyFlow.svg
+  |- server.js (bridge MQTT/WebSocket + API REST)
 
 /Docs
-spiegazione dettagliata
+  |- documentazione extra (schemi, note, immagini)
 
 /LICENSE
 /README.md
-
-
----
-
-## Dettagli Firmware
-
-### Flusso di avvio
-1. Inizializzazione clock, GPIO, SPI, UART/USART (log opzionale).
-2. Inizializzazione stack LoRaWAN; caricamento parametri OTAA (DevEUI, AppEUI/JoinEUI, AppKey).
-3. Join OTAA; al completamento, disattivazione del LED rosso lampeggiante come indicatore di rete attiva.
-4. Inizializzazione SCL3300: verifica WHOAMI, settaggio modalità operativa da datasheet.
-5. Calibrazione automatica: acquisizione 100 campioni, calcolo offset per X/Y/Z.
-6. Loop di misura: lettura dati, applicazione filtro EMA, impacchettamento payload, invio periodico uplink. Gestione downlink per comandi remoti (es. ri-calibrazione).
-
-### Filtro EMA
-- Implementazione su ciascun asse: `y[n] = α·x[n] + (1−α)·y[n−1]`, vedi  `About/Filtro`.
-- Valore predefinito α tipicamente compreso tra 0,1 e 0,3 (configurabile in `app_config.h`).
-
-### Indicatori di stato
-- LED rosso lampeggiante: dispositivo in join/ricerca rete.
-- LED rosso spento: join completato, rete attiva.
-- Messaggi UART opzionali: log diagnostico di inizializzazione, WHOAMI, calibrazione, errori.
-
----
-
-## Formato dei Dati e Codifica
-
-### Payload binario (uplink)
-- Dimensione: 16 byte totali.
-- Struttura (little-endian consigliato):
-  - Byte 0–3: Asse X (float IEEE-754 32-bit) oppure int32 scalato.
-  - Byte 4–7: Asse Y (float 32-bit) oppure int32 scalato.
-  - Byte 8–11: Asse Z (float 32-bit) oppure int32 scalato.
-  - Byte 12–15: Temperatura interna (float 32-bit) oppure int32 scalato.
-- Nota: per deployment a basso overhead si consiglia la rappresentazione int32 scalata (es. mdeg o mg) documentando i fattori di scala in `payload_format.md`.
-
-### Pipeline di trasmissione
-1. Acquisizione → filtraggio EMA → normalizzazione/scala → packing binario 16 byte.
-2. Conversione in HEX.
-3. Codifica Base64 per inoltro su MQTT, quando previsto dal flusso gateway.
-
-### Pipeline di ricezione (lato server/dashboard)
-1. Base64 → HEX → binario.
-2. Parse dei 4 campi (X, Y, Z, T).
-3. Applicazione fattori di scala inversi o interpretazione float IEEE-754.
-
-### Esempio di decodifica (JavaScript, valori float 32-bit little-endian)
-```js
-function decodeBase64Payload(b64) {
-  const raw = atob(b64); // stringa binaria
-  const bytes = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
-  const view = new DataView(bytes.buffer);
-  const x = view.getFloat32(0, true);
-  const y = view.getFloat32(4, true);
-  const z = view.getFloat32(8, true);
-  const t = view.getFloat32(12, true);
-  return { x, y, z, t };
-}
 ```
 
+---
 
-## Comandi Remoti (Downlink)
+## Firmware STM32WLE5
 
-- **Calibrazione remota**: comando per ri-avviare la sequenza di offset (100 campioni).
-- **Reset filtro EMA**: re-inizializza gli stati dei tre canali.
-- **Parametrizzazione**: aggiornamento del coefficiente α dell’EMA, del periodo di uplink e delle soglie di warning.
+### Sequenza di avvio
 
-I comandi sono ricevuti e interpretati nel firmware (callback di downlink), con ack opzionale via uplink.
+1. **Setup MCU**
+   - configurazione clock, GPIO, SPI, UART di debug e LED di stato.
+2. **Stack LoRaWAN**
+   - caricamento DevEUI, JoinEUI/AppEUI e AppKey;
+   - join OTAA con feedback su LED/log.
+3. **Inizializzazione SCL3300**
+   - setup SPI e chip-select;
+   - lettura registri WHOAMI e configurazione banchi.
+4. **Calibrazione offset**
+   - raccolta di 100 campioni;
+   - media per X, Y, Z e memorizzazione degli offset;
+   - log progressivo su UART ogni 10%.
+5. **Setup filtri EMA**
+   - tre filtri circolari per angoli (strutture `EMA1_CircularDeg`);
+   - filtro scalare `EMA1_Adaptive` per temperatura.
+6. **Loop operativo**
+   - acquisizione periodica del sensore;
+   - applicazione offset e filtri;
+   - packing dei quattro float in 16 byte;
+   - invio uplink con periodo configurabile;
+   - gestione callback di downlink (es. comando `calibration`, reset, cambio parametri).
+
+### Filtro EMA adattivo (`ema_adaptive.h`)
+
+- Alpha dinamico con limiti `EMA_ALPHA_MIN = 0.001` e `EMA_ALPHA_MAX = 0.2`.
+- Stima interna della varianza per regolare la rapidita del filtro.
+- Per gli angoli, l'EMA lavora su seno e coseno per garantire continuita attorno a +/-180 gradi; wrapper `wrap_deg()` riporta il risultato nell'intervallo corretto.
 
 ---
 
-## Configurazione del Gateway RAK7268V2 (OTAA)
+## Formato dati uplink
 
-1. Creare un’applicazione LoRaWAN nel gateway.
-2. Registrare il dispositivo in modalità OTAA, annotando **DevEUI**, **JoinEUI (AppEUI)** e **AppKey**.
-3. Impostare la **regione EU868** e un profilo di data rate adeguato.
-4. Abilitare l’inoltro a un **broker MQTT** (interno/esterno), specificando topic e credenziali.
-5. Verificare la corrispondenza dei parametri anche nel firmware (`app_config.h`):
-   - `DEV_EUI`, `JOIN_EUI`, `APP_KEY`.
-6. Riavviare il nodo: al join completato, l’indicatore **LED rosso si spegne**.
+| Offset | Tipo        | Campo | Descrizione                         |
+| ------ | ----------- | ----- | ----------------------------------- |
+| 0-3    | `float32` LE | X     | Angolo filtrato asse X (gradi)      |
+| 4-7    | `float32` LE | Y     | Angolo filtrato asse Y (gradi)      |
+| 8-11   | `float32` LE | Z     | Angolo filtrato asse Z (gradi)      |
+| 12-15  | `float32` LE | Temp  | Temperatura filtrata (gradi Celsius)|
 
----
+Workflow:
 
-## Build e Flash (STM32CubeIDE)
+1. Il nodo LoRa invia il payload binario di 16 byte.
+2. Il network server/gateway lo pubblica su MQTT come campo `data` codificato Base64.
+3. `server.js` decodifica i 16 byte e produce `{ x, y, z, t }`, con meta-dati RF (RSSI, SNR, frequenza, frame counter).
+4. La dashboard riceve il messaggio via WebSocket e aggiorna indicatori, grafici, storico e log.
 
-### Import del progetto
-- `File → Import → Existing Projects into Workspace` → selezionare la cartella `/Firmware`.
-- Verificare la toolchain (GCC for STM32) e le opzioni di ottimizzazione.
+Snippet di decodifica in Node.js:
 
-### Configurazione
-- Aggiornare `app_config.h` con chiavi OTAA e parametri operativi (α EMA, periodo uplink, pin SPI).
-- Verificare i pin SPI per SCL3300 (MOSI/MISO/SCK/CS) e GPIO LED.
-
-### Compilazione e flash
-- Build del progetto in modalità **Release**.
-- Collegare **ST-Link**, eseguire `Run → Debug/Run`.
-- Opzionale: abilitare retarget UART per log su seriale.
-
----
-
-## Installazione e Avvio (Plug & Play)
-
-1. Flash del firmware sulla **LoRa-E5 Mini**.
-2. Collegamento fisico **SCL3300** su bus **SPI** come da schemi (vedi `/Docs/schematic.pdf`).
-3. Configurazione del gateway **RAK7268V2** in **OTAA** con le stesse chiavi del firmware.
-4. Avvio **broker Mosquitto** e, se previsto, servizio di decoding.
-5. Alimentazione del nodo: il dispositivo esegue **join**, si **calibra** e avvia gli **uplink** secondo il periodo configurato.
+```js
+const buf = Buffer.from(dataB64, "base64");
+const x = buf.readFloatLE(0);
+const y = buf.readFloatLE(4);
+const z = buf.readFloatLE(8);
+const t = buf.readFloatLE(12);
+```
 
 ---
 
-## Dashboard Web
+## Comandi remoti (downlink)
 
-- File nella cartella `/Web` (HTML/CSS/JS, Chart.js o libreria equivalente).
-- Connessione a broker **MQTT** via **WebSocket** (se abilitato) o tramite un backend di bridging.
+1. L'utente invia un comando testuale dalla dashboard (es. `calibration`).
+2. La dashboard chiama `POST /api/command` con JSON `{ "command": "calibration" }`.
+3. `server.js` converte la stringa in Base64 e pubblica sul topic di downlink:
 
-### Visualizzazioni
-- Trend di **X / Y / Z / Temperatura**.
-- Log eventi (**join**, **uplink**, **downlink**).
-- Stato rete e ultimo **RSSI/SNR** (se disponibili nei metadati).
+```js
+const payload = {
+  confirmed: false,
+  fPort: 2,
+  data: Buffer.from(command, "utf8").toString("base64"),
+};
+```
 
-### Pannello comandi
-- Pulsante **calibrazione remota**.
-- Impostazione parametri (**α EMA**, **periodo uplink**).
+4. Il network server inoltra il downlink al dispositivo.
+5. Il firmware gestisce il comando nella callback dedicata.
 
----
-
-## Prestazioni e Considerazioni
-
-- **Filtraggio**: l’EMA riduce il rumore preservando la dinamica; scegliere α in funzione della latenza accettabile.
-- **Consumi**: per nodi a batteria, ottimizzare duty-cycle, data rate, potenza TX e sleep tra misure.
-- **Affidabilità**: verificare retry LoRaWAN, conferme ACK e politiche di rejoin.
-- **Sicurezza**: mantenere segrete le chiavi OTAA; usare **TLS** per il trasporto MQTT su reti pubbliche.
+Comandi tipici implementabili: `calibration`, `RESET`, `LEDON`/`LEDOFF`, variazione periodo uplink, ripristino parametri.
 
 ---
 
-## PCB e Collegamenti
+## Configurazione gateway LoRaWAN (OTAA)
 
-- PCB personalizzato con integrazione **LoRa-E5 + SCL3300**.
-- Dimensioni indicative: **40 mm × 20 mm**.
-- Vedere `/Docs/schematic.pdf` e `/Docs/pcb_layout.png` per pinout e footprint.
-- Layout consigliato: tracce SPI corte, piano di massa continuo, separazione RF/analogico.
+1. Creare una application nel network server e registrare il dispositivo in OTAA.
+2. Annotare DevEUI, JoinEUI/AppEUI e AppKey.
+3. Impostare la regione EU868 e un data rate coerente.
+4. Abilitare l'output MQTT con host, porta, credenziali e topic:
+   - uplink: `application/<AppName>/device/<DevEUI>/rx`
+   - downlink: `application/<AppName>/device/<DevEUI>/tx`
+5. Aggiornare in `server.js`:
+   - `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`;
+   - `MQTT_TOPIC_UPLINK` e `TOPIC_DOWN`.
+6. Allineare le stesse chiavi in `Firmware/app_config.h`.
+7. Riavviare il nodo e verificare la conferma del join.
+
+---
+
+## Bridge Node.js (`/Web/server.js`)
+
+- Serve contenuti statici su HTTP (8082) e API REST (`/api/ping`, `/api/command`).
+- Gestisce WebSocket su 8081 con broadcast di:
+  - stato MQTT;
+  - messaggi `uplink` con dati decodificati e meta LoRa;
+  - log (`info`, `uplink`, `downlink`, `error`);
+  - conferma locale `downlink_sent`.
+- Client MQTT integrato con gestione riconnessione e log di eventuali errori.
+
+---
+
+## Dashboard web (`/Web`)
+
+### Stack
+
+- HTML/CSS/JS vanilla.
+- Chart.js 4 con `chartjs-adapter-date-fns` e `chartjs-plugin-zoom`.
+- Icone Lucide.
+
+### Funzionalita
+
+- **Top bar**: stato WebSocket, stato MQTT, pulsanti Connect e Reset.
+- **Pannello flusso dati**: SVG animato (EnergyFlow) per visualizzare uplink/downlink e statistiche istantanee (X, Y, Z, Temp, RSSI, SNR, frequenza, frame counter).
+- **Grafici**:
+  - vista singola con quattro dataset;
+  - vista alternativa con quattro grafici separati;
+  - zoom/pan e reset;
+  - esportazione PNG.
+- **Log e comandi**:
+  - log con tag colorati (UP, DN, ERR, INFO);
+  - input comando + chip rapidi;
+  - pannello JSON raw per il payload MQTT.
+- **Storico avanzato**:
+  - lista cronologica dei campioni con meta LoRa;
+  - calcolo on demand dei valori min/max per X, Y, Z, Temp;
+  - export CSV (`storico_<timestamp>.csv`) con separatore `;`.
+- **Autosalvataggio locale**:
+  - `saveToLocal()` salva storico e log in `localStorage`;
+  - `loadFromLocal()` ripristina i dati all'avvio e mostra un badge di conferma.
+
+---
+
+## Build e flashing del firmware
+
+1. Importare il progetto in STM32CubeIDE (`File -> Import -> Existing Projects into Workspace`) puntando a `/Firmware`.
+2. Aggiornare `app_config.h` con chiavi OTAA e parametri operativi (periodo uplink, data rate, potenza TX).
+3. Controllare la configurazione pin per SPI (MOSI, MISO, SCK, CS), UART di log e LED.
+4. Compilare in modalita Release.
+5. Collegare ST-Link ed eseguire `Run` o `Debug`.
+6. (Opzionale) Abilitare log UART e diagnostica dettagliata (`SCL3300_DebugDump()`).
+
+---
+
+## Installazione e avvio rapidi
+
+1. **Firmware**
+   - Flash su LoRa-E5 Mini.
+   - Collegare SCL3300 come da schemi in `/Docs`.
+2. **Broker MQTT**
+   - Avviare Mosquitto o equivalente, configurare credenziali se richieste.
+3. **Gateway / Network server**
+   - Configurare applicazione OTAA e abilitare i topic MQTT concordati.
+4. **Bridge + dashboard**
+   - Nella cartella `/Web` eseguire:
+     ```bash
+     npm install
+     npm start
+     ```
+   - Aprire il browser su `http://localhost:8082/`.
+5. **Start del sistema**
+   - Alimentare il nodo (join OTAA, calibrazione iniziale, uplink periodici).
+   - In dashboard premere **Connect** e verificare arrivo dati e log.
+
+---
+
+## Prestazioni e linee guida
+
+- **Filtro EMA adattivo**: alpha dinamico offre equilibrio tra riduzione rumore (alpha piccolo) e risposta rapida (alpha grande). La versione circolare elimina discontinuita attorno ai limiti angolari.
+- **Consumo energetico**: per nodi a batteria aumentare il periodo di acquisizione, usare data rate LoRaWAN piu alto e valutare sleep MCU/sensore tra le misure.
+- **Affidabilita**: monitorare `fCnt`, configurare retry, conferme ACK e politiche di rejoin lato network server.
+- **Sicurezza**: proteggere le chiavi OTAA, abilitare TLS su MQTT in ambienti non fidati, limitare l'accesso alla dashboard di comando remoto.
+
+---
+
+## PCB e cablaggio
+
+- PCB custom con LoRa-E5 e SCL3300, dimensioni tipiche 40 x 20 mm.
+- Suggerimenti layout:
+  - tracce SPI corte e schermate;
+  - piano di massa continuo;
+  - separazione zona RF da digitale e sensore;
+  - posizionamento accurato dell'antenna.
+- Riferimenti aggiuntivi in `/Docs/schematic.pdf` e `/Docs/pcb_layout.png` se presenti.
 
 ---
 
 ## Troubleshooting
 
-- **Join non riuscito**: verificare regione **EU868**, chiavi OTAA e copertura gateway.
-- **WHOAMI fallito**: controllare cablaggio SPI, CS, frequenza clock e alimentazione sensore.
-- **Dati errati o saturi**: rivedere scala fisica/offset; eseguire **calibrazione remota**.
-- **Dashboard vuota**: controllare connessione MQTT, topic e decoder **Base64/HEX**.
+- **Join non riuscito**
+  - verificare regione EU868 e chiavi DevEUI/JoinEUI/AppKey;
+  - controllare copertura radio e antenna.
+- **WHOAMI del SCL3300 fallito**
+  - controllare cablaggio SPI, polarita clock e alimentazione;
+  - assicurarsi che il chip-select venga gestito correttamente.
+- **Dati rumorosi o saturi**
+  - effettuare la calibrazione con sensore fermo;
+  - verificare fattori di scala e unita;
+  - ripetere `calibration` via comando downlink.
+- **Dashboard senza dati**
+  - verificare stato WebSocket e MQTT;
+  - controllare topic configurati in `server.js`;
+  - ispezionare la console browser e i log di `server.js`.
+- **Downlink ignorati**
+  - confermare topic di downlink e fPort;
+  - verificare nel firmware la gestione del comando ricevuto;
+  - controllare gli ACK nel network server.
 
 ---
 
 ## Licenza
 
-Questo progetto è distribuito con licenza **MIT**. Vedere il file `LICENSE` per i dettagli.
+Distribuito con licenza **MIT**. Vedere il file `LICENSE` per i dettagli.
 
 ---
 
-## Riferimenti
+## Autore
 
-- Murata, **SCL3300 Datasheet**.
-- STMicroelectronics, **STM32WLE5 Reference Manual (RM0461)** e HAL Drivers.
-- LoRa Alliance, **LoRaWAN 1.0.4 Specification**.
-- RAKwireless, **Documentazione RAK7268V2**.
-- Eclipse Mosquitto, **Documentazione MQTT**.
-
----
-
-## Autore e Contatti
-
-<p align="center"><strong>Autore: DI FILIPPO DAVIDE</strong></p>
-
-
-<!-- GitHub Profile Button -->
-<div align="center" style="margin-top: 20px;">
-  <a href="https://github.com/davide0707">
-    <img src="https://img.shields.io/badge/GitHub-%232C3539?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Profile" style="border-radius: 10px;" />
-  </a>
-</div>
-
-
-
-<!-- Contact Section -->
-<h3 align="center" style="margin-top: 40px; font-family: 'Arial', sans-serif; color: #2C3539; font-size: 2em;">📬 Contact Me</h3>
-<div align="center" style="font-family: 'Arial', sans-serif; color: #333; margin-top: 15px;">
-  <p>
-    <img src="https://img.shields.io/badge/Email-EA4335?style=flat-square&logo=gmail&logoColor=white" alt="Email" />
-    <strong>E-mail:</strong> difilippodavide.github@gmail.com
-  </p>
-  <p>
-    <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" />
-    <strong>GitHub:</strong> <a href="https://github.com/davide0707" style="color: #3C76D7;">davide0707</a>
-  </p>
-</div>
-
-<p align="center"><strong>Anno: 2025</strong></p>
-
+- **Davide Di Filippo**
+- GitHub: [github.com/davide0707](https://github.com/davide0707)
+- Email: `difilippodavide.github@gmail.com`
+- Anno: 2025
