@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LoRa Sensor Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Font -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Chart.js + plugin zoom -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+    <link rel="stylesheet" href="style.css" />
+  </head>
+
+  <body>
+    <div class="app-root">
+      <!-- HEADER -->
+      <header class="top-bar">
+        <div class="brand">
+          <div class="brand-dot"></div>
+          <div class="brand-text">
+            <span class="brand-title">LoRa Sensor Dashboard</span>
+            <span class="brand-subtitle">SCL3300 • STM32WL • MQTT</span>
+          </div>
+        </div>
+
+        <div class="connection-panel">
+          <div class="conn-info">
+            <span class="conn-label">WebSocket</span>
+            <span id="ws-status" class="status-pill status-disconnected">
+              Disconnected
+            </span>
+          </div>
+          <div class="conn-info">
+            <span class="conn-label">MQTT</span>
+            <span id="mqtt-status" class="status-pill status-unknown">
+              Unknown
+            </span>
+          </div>
+          <button id="btn-reset-all" class="btn-ghost btn-reset">
+            <i data-lucide="rotate-ccw"></i>
+            <span>Reset</span>
+          </button>
+          <button id="btn-connect" class="btn-primary">Connect</button>
+        </div>
+      </header>
+
+      <!-- CONTENUTO CENTRALE -->
+      <main class="main-layout">
+
+        <!-- BLOCCO: FLUSSO DATI -->
+        <section class="panel panel-flow">
+          <div class="panel-header">
+            <h2>Data flow</h2>
+            <span class="panel-subtitle">
+              Sensor SCL3300 ⇄ LoRa Board STM32WL ⇄ Modem / Gateway MQTT
+            </span>
+          </div>
+
+          <!-- SVG animato -->
+          <div class="energyflow-wrapper" style="display: flex; justify-content: center;">
+            <object
+              id="EnergyFlowSvg"
+              data="EnergyFlow.svg"
+              type="image/svg+xml"
+              width="900"
+              height="420"
+            ></object>
+          </div>
+
+          <!-- STATISTICHE SENSORIALI -->
+          <div class="flow-stats">
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">X</div>
+                <div class="stat-row">
+                  <span id="stat-x" class="stat-value">–</span>
+                  <span class="stat-unit">°</span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Y</div>
+                <div class="stat-row">
+                  <span id="stat-y" class="stat-value">–</span>
+                  <span class="stat-unit">°</span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Z</div>
+                <div class="stat-row">
+                  <span id="stat-z" class="stat-value">–</span>
+                  <span class="stat-unit">°</span>
+                </div>
+              </div>
+              <div class="stat-card stat-card-temp">
+                <div class="stat-label">Temp</div>
+                <div class="stat-row">
+                  <span id="stat-temp" class="stat-value">–</span>
+                  <span class="stat-unit">°C</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rf-meta">
+              <div>
+                <span class="rf-label">RSSI</span>
+                <span id="rf-rssi" class="rf-value">–</span>
+              </div>
+              <div>
+                <span class="rf-label">SNR</span>
+                <span id="rf-snr" class="rf-value">–</span>
+              </div>
+              <div>
+                <span class="rf-label">FREQ</span>
+                <span id="rf-freq" class="rf-value">–</span>
+              </div>
+              <div>
+                <span class="rf-label">FCNT</span>
+                <span id="rf-fcnt" class="rf-value">–</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BLOCCO: GRAFICO -->
+        <section class="panel panel-chart">
+          <div class="panel-header panel-header-inline">
+            <div class="panel-title-group">
+              <h2>EMA X / Y / Z / Temp</h2>
+              <span class="panel-subtitle">
+                Real-time display of the latest filtered readings
+              </span>
+            </div>
+            <div class="chart-actions">
+              <button id="btn-reset-zoom" class="btn-ghost">Reset zoom</button>
+              <button id="btn-toggle-charts" class="btn-ghost">View 4 charts</button>
+              <button id="btn-export-chart" class="btn-ghost">Export chart</button>
+              <button id="btn-export-data" class="btn-ghost">Export data</button>
+              <button id="btn-show-history" class="btn-ghost">History / Max-Min</button>
+            </div>
+          </div>
+
+          <div class="chart-wrapper">
+            <!-- Singolo grafico grande -->
+            <div id="chart-single" class="chart-container chart-container-main">
+              <canvas id="chart-main"></canvas>
+            </div>
+
+            <!-- Griglia 2x2 con 4 grafici -->
+            <div id="chart-multi" class="chart-multi-grid">
+              <div class="chart-container chart-container-small">
+                <div class="chart-small-title">EMA X</div>
+                <canvas id="chart-x"></canvas>
+              </div>
+              <div class="chart-container chart-container-small">
+                <div class="chart-small-title">EMA Y</div>
+                <canvas id="chart-y"></canvas>
+              </div>
+              <div class="chart-container chart-container-small">
+                <div class="chart-small-title">EMA Z</div>
+                <canvas id="chart-z"></canvas>
+              </div>
+              <div class="chart-container chart-container-small">
+                <div class="chart-small-title">Temp</div>
+                <canvas id="chart-t"></canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BLOCCO: LOG + COMANDI -->
+        <section class="panel panel-bottom">
+          <div class="bottom-layout">
+            <!-- LOG -->
+            <div class="logs-column">
+              <div class="panel-header">
+                <h2>Event log</h2>
+                <span class="panel-subtitle">
+                  Uplink, downlink, errors and messages from the backend
+                </span>
+              </div>
+              <div class="logs-panel">
+                <div class="logs-header">
+                  <span>Latest events</span>
+                  <span id="log-count" class="logs-count">0 events</span>
+                </div>
+                <div id="logs-list" class="logs-list"></div>
+              </div>
+            </div>
+
+            <!-- COMANDI -->
+            <div class="commands-column">
+              <div class="panel-header">
+                <h2>Commands to device</h2>
+                <span class="panel-subtitle">
+                  Downlink to MQTT → LoRa (simple text)
+                </span>
+              </div>
+
+              <div class="cmd-grid">
+                <div class="cmd-left">
+                  <label class="field-label" for="cmd-input">
+                    Command text (e.g. <code>calibration</code>):
+                  </label>
+                  <div class="cmd-input-row">
+                    <input
+                      id="cmd-input"
+                      type="text"
+                      placeholder="Write a command..."
+                    />
+                    <button id="btn-send-command" class="btn-primary">Send</button>
+                  </div>
+
+                  <div class="cmd-quick">
+                    <span>Quick:</span>
+                    <button class="chip-btn" data-cmd="calibration">calibration</button>
+                    <button class="chip-btn" data-cmd="LEDON">LEDON</button>
+                    <button class="chip-btn" data-cmd="LEDOFF">LEDOFF</button>
+                    <button class="chip-btn" data-cmd="RESET">RESET</button>
+                  </div>
+
+                  <div id="cmd-status" class="cmd-status-text">No command sent</div>
+                </div>
+
+                <div class="cmd-right">
+                  <div class="panel-header">
+                    <h3>MQTT Raw uplink</h3>
+                    <span class="panel-subtitle">
+                      Payload JSON as received from the broker
+                    </span>
+                  </div>
+                  <pre id="mqtt-raw" class="mqtt-raw"></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- SIDE PANEL STORICO AVANZATO -->
+      <aside id="history-panel" class="history-panel">
+        <div class="history-header">
+          <h3>Historical EMA / RF</h3>
+          <button id="btn-close-history" class="btn-icon">✕</button>
+        </div>
+
+        <div class="history-extrema">
+          <div class="history-extrema-header">
+            <span>Max / Min (historical calculation)</span>
+            <button id="btn-calc-extrema" class="btn-ghost btn-ghost-small">Calculate</button>
+          </div>
+          <div class="extrema-grid">
+            <div class="extrema-item">
+              <div class="ext-label">X (°)</div>
+              <div class="ext-row">
+                <span class="badge-label">min</span>
+                <span id="ext-x-min" class="ext-value">–</span>
+              </div>
+              <div class="ext-row">
+                <span class="badge-label">max</span>
+                <span id="ext-x-max" class="ext-value">–</span>
+              </div>
+            </div>
+
+            <div class="extrema-item">
+              <div class="ext-label">Y (°)</div>
+              <div class="ext-row">
+                <span class="badge-label">min</span>
+                <span id="ext-y-min" class="ext-value">–</span>
+              </div>
+              <div class="ext-row">
+                <span class="badge-label">max</span>
+                <span id="ext-y-max" class="ext-value">–</span>
+              </div>
+            </div>
+
+            <div class="extrema-item">
+              <div class="ext-label">Z (°)</div>
+              <div class="ext-row">
+                <span class="badge-label">min</span>
+                <span id="ext-z-min" class="ext-value">–</span>
+              </div>
+              <div class="ext-row">
+                <span class="badge-label">max</span>
+                <span id="ext-z-max" class="ext-value">–</span>
+              </div>
+            </div>
+
+            <div class="extrema-item">
+              <div class="ext-label">Temp (°C)</div>
+              <div class="ext-row">
+                <span class="badge-label">min</span>
+                <span id="ext-t-min" class="ext-value">–</span>
+              </div>
+              <div class="ext-row">
+                <span class="badge-label">max</span>
+                <span id="ext-t-max" class="ext-value">–</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="history-list" class="history-list"></div>
+      </aside>
+    </div>
+
+    <script src="app.js"></script>
+    <!-- BADGE AUTO SALVATO (flottante in basso a destra) -->
+    <div id="autosave-badge" class="autosave-badge hidden">
+      <i data-lucide="save"></i>
+      <span>Auto-saved</span>
+    </div>
+  </body>
+</html>
