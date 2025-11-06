@@ -1,0 +1,50 @@
+version: '3.8'
+
+networks:
+  rete-locale:
+    driver: bridge
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: dati
+    ports:
+      - "5432:5432"
+    networks:
+      - rete-locale
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - timescaledb
+    networks:
+      - rete-locale
+
+  nodeapp:
+    build: .
+    container_name: nodeapp
+    ports:
+      - "8081:8081"  # WebSocket per dashboard
+      - "8082:8082"  # REST API backend
+      - "1884:1884"  # Broker Mosquitto integrato
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: admin
+      DB_NAME: dati
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+    networks:
+      - rete-locale
