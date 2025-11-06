@@ -1,3 +1,4 @@
+sed 's/;/,/g' dati_originali.csv > dati_puliti.csv
 Time_ISO;X_deg;Y_deg;Z_deg;Temp_C;RSSI_dBm;SNR_dB;Freq_MHz;FCNT
 2025-11-05T09:49:25.000Z;0.006;0.007;-0.007;18.899;-105;-15.5;867.300;1
 2025-11-05T09:50:05.000Z;0.001;-0.001;-0.001;18.889;-104;-18.8;868.300;1
