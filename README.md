@@ -327,4 +327,6 @@ Distribuito con licenza **MIT**. Vedere il file `LICENSE` per i dettagli.
 - **Davide Di Filippo**
 - GitHub: [github.com/davide0707](https://github.com/davide0707)
 - Email: `difilippodavide.github@gmail.com`
+- **Qyrani Matteo**
+- GitHub: [github.com/Qyranico](https://github.com/Qyranico)
 - Anno: 2025
